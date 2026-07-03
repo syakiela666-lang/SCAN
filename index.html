@@ -254,6 +254,13 @@
         let currentSortCol = 'vol';
         let currentSortDir = 'desc'; 
 
+        // === SISTEM FALLBACK POLLING (Anti-Block ISP) ===
+        let useListPolling = false;
+        let listLastMsgTime = Date.now();
+        
+        let useRadarPolling = false;
+        let radarLastMsgTime = Date.now();
+
         function formatPrice(p) {
             const num = parseFloat(p);
             if (num < 0.1) return num.toFixed(5);
@@ -337,11 +344,10 @@
 
         function startListWebsocket() {
             if (listWs) listWs.close();
-            console.log("[DEBUG] Memulai List Websocket (Kiri) via SUBSCRIBE method...");
             listWs = new WebSocket('wss://fstream.binance.com/ws');
+            listLastMsgTime = Date.now();
             
             listWs.onopen = () => {
-                console.log("[DEBUG] List Websocket CONNECTED, Mengirim payload SUBSCRIBE...");
                 document.getElementById('ws-status').innerText = '🟢';
                 listWs.send(JSON.stringify({
                     method: "SUBSCRIBE",
@@ -351,13 +357,11 @@
             };
 
             listWs.onmessage = (event) => {
+                listLastMsgTime = Date.now();
+                useListPolling = false; 
+
                 try {
                     const msg = JSON.parse(event.data);
-                    
-                    if (msg.id === 1) {
-                        console.log("[DEBUG] List WS Berhasil Subscribe! Response:", msg);
-                        return;
-                    }
                     
                     if (Array.isArray(msg)) {
                         msg.forEach(ticker => {
@@ -377,20 +381,51 @@
                             }
                         });
                     }
-                } catch(e) {
-                    console.error("[ERROR] Gagal parsing pesan List WS:", e, event.data);
-                }
+                } catch(e) {}
             };
             
-            listWs.onerror = (e) => {
-                console.error("[ERROR] List WS Error", e);
-                document.getElementById('ws-status').innerText = '🔴';
-            };
-            listWs.onclose = (e) => {
-                console.log("[DEBUG] List WS Terputus (Closed)", e.code, e.reason);
+            listWs.onerror = () => document.getElementById('ws-status').innerText = '🔴';
+            listWs.onclose = () => {
                 document.getElementById('ws-status').innerText = '🔴';
                 setTimeout(startListWebsocket, 3000);
             };
+        }
+
+        // WATCHDOG UNTUK LIST KOIN (Jika WS diblokir ISP)
+        setInterval(() => {
+            if (Date.now() - listLastMsgTime > 5000) {
+                if (!useListPolling) {
+                    console.log("[DEBUG] WS List tidak menerima data. Beralih otomatis ke REST Polling.");
+                    useListPolling = true;
+                    document.getElementById('ws-status').innerText = '🟡'; // Kuning = Mode Polling
+                }
+                pollListApi();
+            }
+        }, 3000);
+
+        async function pollListApi() {
+            if (!useListPolling) return;
+            try {
+                const res = await fetch(REST_URL);
+                const data = await res.json();
+                data.forEach(ticker => {
+                    const symbol = ticker.symbol;
+                    const changeEl = document.getElementById(`change-${symbol}`);
+                    const priceEl = document.getElementById(`price-${symbol}`);
+                    
+                    if (changeEl && priceEl) {
+                        const change = parseFloat(ticker.priceChangePercent);
+                        const changeClass = change >= 0 ? 'up' : 'down';
+                        const changeSign = change >= 0 ? '+' : '';
+                        
+                        changeEl.className = `coin-change ${changeClass}`;
+                        changeEl.innerText = `${changeSign}${change.toFixed(2)}%`;
+                        priceEl.innerText = `${formatPrice(ticker.lastPrice)}`;
+                    }
+                });
+            } catch(e) {
+                console.error("Polling List Error:", e);
+            }
         }
 
         function toggleCoinSelection(checkbox) {
@@ -448,9 +483,7 @@
                     };
                     
                     await new Promise(r => setTimeout(r, 100)); 
-                } catch(e) {
-                    console.error("[ERROR] Gagal tarik kline", symbol, e);
-                }
+                } catch(e) {}
             }
             
             renderDashboard();
@@ -462,11 +495,10 @@
             const streams = Array.from(selectedCoins).map(sym => `${sym.toLowerCase()}@kline_1m`);
             if (streams.length === 0) return;
             
-            console.log("[DEBUG] Memulai Radar Websocket (Kanan) via SUBSCRIBE...");
             radarWs = new WebSocket('wss://fstream.binance.com/ws');
+            radarLastMsgTime = Date.now();
             
             radarWs.onopen = () => {
-                console.log("[DEBUG] Radar Websocket CONNECTED, Mengirim Subscribe:", streams);
                 document.getElementById('radar-status').innerText = '🟢';
                 radarWs.send(JSON.stringify({
                     method: "SUBSCRIBE",
@@ -476,13 +508,11 @@
             };
 
             radarWs.onmessage = (event) => {
+                radarLastMsgTime = Date.now();
+                useRadarPolling = false;
+
                 try {
                     const msg = JSON.parse(event.data);
-                    
-                    if (msg.id === 2) {
-                        console.log("[DEBUG] Radar WS Berhasil Subscribe! Response:", msg);
-                        return;
-                    }
                     
                     if (msg.e === 'kline' && msg.k) {
                         const kline = msg.k;
@@ -519,20 +549,74 @@
                         
                         renderDashboard();
                     }
-                } catch(e) {
-                    console.error("[ERROR] Gagal parsing pesan Radar WS:", e, event.data);
-                }
+                } catch(e) {}
             };
 
-            radarWs.onerror = (e) => {
-                console.error("[ERROR] Radar WS Error", e);
-                document.getElementById('radar-status').innerText = '🔴';
-            };
-            radarWs.onclose = (e) => {
-                console.log("[DEBUG] Radar WS Terputus (Closed)", e.code, e.reason);
+            radarWs.onerror = () => document.getElementById('radar-status').innerText = '🔴';
+            radarWs.onclose = () => {
                 document.getElementById('radar-status').innerText = '🔴';
                 setTimeout(startRadarWebsocket, 3000);
             };
+        }
+
+        // WATCHDOG UNTUK RADAR DASHBOARD (Jika WS diblokir ISP)
+        setInterval(() => {
+            if (selectedCoins.size > 0 && Date.now() - radarLastMsgTime > 5000) {
+                if (!useRadarPolling) {
+                    console.log("[DEBUG] WS Radar tidak menerima data. Beralih otomatis ke REST Polling.");
+                    useRadarPolling = true;
+                    document.getElementById('radar-status').innerText = '🟡'; // Kuning = Mode Polling
+                }
+                pollRadarApi();
+            }
+        }, 2000); // Polling setiap 2 detik (Sangat aman dari limit Binance API)
+
+        async function pollRadarApi() {
+            if (!useRadarPolling || selectedCoins.size === 0) return;
+            
+            for (let symbol of selectedCoins) {
+                try {
+                    const res = await fetch(`https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=1m&limit=2`);
+                    const klines = await res.json();
+                    if (klines.length === 0) continue;
+                    
+                    const kline = klines[klines.length - 1]; 
+                    const data = scannedData[symbol];
+                    if (!data) continue;
+                    
+                    const klineTime = kline[0];
+                    const closePrice = parseFloat(kline[4]);
+                    const volume = parseFloat(kline[5]);
+                    const tbVol = parseFloat(kline[9]);
+                    
+                    if (klineTime === data.lastKlineTime) {
+                        data.closes[data.closes.length - 1] = closePrice;
+                        data.volumes[data.volumes.length - 1] = volume;
+                        data.takerBuys[data.takerBuys.length - 1] = tbVol;
+                    } else if (klineTime > data.lastKlineTime) {
+                        data.closes.push(closePrice);
+                        data.volumes.push(volume);
+                        data.takerBuys.push(tbVol);
+                        
+                        if (data.closes.length > 50) {
+                            data.closes.shift();
+                            data.volumes.shift();
+                            data.takerBuys.shift();
+                        }
+                        data.lastKlineTime = klineTime;
+                    }
+                    
+                    data.price = closePrice;
+                    data.rsi = calculateRSI(data.closes);
+                    data.volSpike = calculateVolSpike(data.volumes);
+                    data.bsRatio = calculateBSRatio(data.volumes[data.volumes.length - 1], data.takerBuys[data.takerBuys.length - 1]);
+                    data.score = calculateScore(data.rsi, data.volSpike, data.bsRatio);
+                    
+                } catch(e) {
+                    console.error("Polling Radar Error:", e);
+                }
+            }
+            renderDashboard();
         }
 
         function calculateRSI(closes, period = 14) {
