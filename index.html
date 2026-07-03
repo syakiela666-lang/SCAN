@@ -66,7 +66,6 @@
             padding: 0 5px;
         }
         
-        /* Headers List ala Binance */
         .list-headers {
             display: flex;
             justify-content: space-between;
@@ -95,7 +94,7 @@
             padding: 10px 0;
             border-bottom: 1px solid rgba(255,255,255,0.03);
             cursor: pointer;
-            gap: 15px; /* Mengatur jarak agar lebih dekat */
+            gap: 15px; 
         }
         .coin-name { font-weight: bold; font-size: 14px; }
         
@@ -201,13 +200,12 @@
     <div class="sidebar collapsed" id="sidebar">
         <div class="sidebar-header">
             <div class="sidebar-header-top">
-                <strong>Pilih Koin</strong>
+                <strong>Pilih Koin <span id="ws-status" style="font-size:10px; margin-left: 5px;">🔴</span></strong>
                 <button class="close-btn" onclick="toggleSidebar()">✕</button>
             </div>
             <button class="toggle-btn" style="background-color: var(--success); width: 100%;" onclick="startScan()">🚀 Mulai Scan</button>
         </div>
         
-        <!-- Teks dibuat super simple: Pair dan 24h% -->
         <div class="list-headers">
             <div class="lh-col" onclick="handleSort('vol')">Pair <span class="sort-arrow" id="arrow-vol">▾</span></div>
             <div class="lh-col text-right" onclick="handleSort('change')">24h% <span class="sort-arrow" id="arrow-change"></span></div>
@@ -223,6 +221,7 @@
         <div class="top-bar">
             <button class="toggle-btn" onclick="toggleSidebar()">☰ Koin</button>
             <span id="status-text" style="color: var(--text-muted); font-size: 13px;">Memantau 0 Koin</span>
+            <span id="radar-status" style="font-size:10px; margin-left: 5px;"></span>
         </div>
         
         <div class="table-container">
@@ -330,7 +329,7 @@
                         <span class="coin-name">${name}</span>
                     </div>
                     <div style="text-align: right; flex: 1;">
-                        <div class="coin-price" id="price-${coin.symbol}">$${price}</div>
+                        <div class="coin-price" id="price-${coin.symbol}">${price}</div>
                         <div class="coin-change ${changeClass}" id="change-${coin.symbol}">${changeSign}${change.toFixed(2)}%</div>
                     </div>
                 `;
@@ -340,9 +339,13 @@
 
         function startListWebsocket() {
             if (listWs) listWs.close();
-            // Pindah ke combined stream url agar lebih terstruktur event datanya
             listWs = new WebSocket('wss://fstream.binance.com/stream?streams=!ticker@arr');
             
+            listWs.onopen = () => {
+                document.getElementById('ws-status').innerText = '🟢';
+                document.getElementById('ws-status').title = 'Realtime Aktif';
+            };
+
             listWs.onmessage = (event) => {
                 const msg = JSON.parse(event.data);
                 if (!msg.data) return;
@@ -359,13 +362,19 @@
                         
                         changeEl.className = `coin-change ${changeClass}`;
                         changeEl.innerText = `${changeSign}${change.toFixed(2)}%`;
-                        priceEl.innerText = `$${formatPrice(ticker.c)}`;
+                        priceEl.innerText = `${formatPrice(ticker.c)}`;
                     }
                 });
             };
             
-            listWs.onerror = (e) => console.log("WS List Error", e);
-            listWs.onclose = () => setTimeout(startListWebsocket, 3000);
+            listWs.onerror = (e) => {
+                console.log("WS List Error", e);
+                document.getElementById('ws-status').innerText = '🔴';
+            };
+            listWs.onclose = () => {
+                document.getElementById('ws-status').innerText = '🔴';
+                setTimeout(startListWebsocket, 3000);
+            };
         }
 
         function toggleCoinSelection(checkbox) {
@@ -383,7 +392,6 @@
 
         let scannedData = {}; 
         let radarWs = null;
-        let lastRenderTime = 0;
 
         async function startScan() {
             if (selectedCoins.size === 0) {
@@ -400,6 +408,7 @@
 
             scannedData = {}; 
             if (radarWs) radarWs.close();
+            document.getElementById('radar-status').innerText = '🔴';
             
             for (let symbol of selectedCoins) {
                 try {
@@ -428,7 +437,6 @@
                 }
             }
             
-            lastRenderTime = 0;
             renderDashboard();
             startRadarWebsocket();
         }
@@ -441,6 +449,10 @@
             const wsUrl = `wss://fstream.binance.com/stream?streams=${streams.join('/')}`;
             radarWs = new WebSocket(wsUrl);
             
+            radarWs.onopen = () => {
+                document.getElementById('radar-status').innerText = '🟢';
+            };
+
             radarWs.onmessage = (event) => {
                 const msg = JSON.parse(event.data);
                 if (!msg.data || !msg.data.k) return;
@@ -480,8 +492,14 @@
                 renderDashboard();
             };
 
-            radarWs.onerror = (e) => console.log("Radar WS Error", e);
-            radarWs.onclose = () => setTimeout(startRadarWebsocket, 3000);
+            radarWs.onerror = (e) => {
+                console.log("Radar WS Error", e);
+                document.getElementById('radar-status').innerText = '🔴';
+            };
+            radarWs.onclose = () => {
+                document.getElementById('radar-status').innerText = '🔴';
+                setTimeout(startRadarWebsocket, 3000);
+            };
         }
 
         function calculateRSI(closes, period = 14) {
@@ -532,35 +550,60 @@
             return score; 
         }
 
+        // Metode render tanpa throttle, cukup mengubah isi node spesifik 
+        // sehingga UI bisa terupdate belasan kali sedetik tanpa CPU berat atau berkedip jelek
         function renderDashboard() {
-            const now = Date.now();
-            if (now - lastRenderTime < 500 && Object.keys(scannedData).length > 0) return;
-            lastRenderTime = now;
-
             const tbody = document.getElementById('dashboard-body');
             const sorted = Object.values(scannedData).sort((a,b) => b.score - a.score || b.volSpike - a.volSpike);
             
             if (sorted.length === 0) return;
 
-            let html = '';
-            sorted.forEach(data => {
+            if (tbody.children.length !== sorted.length || tbody.innerHTML.includes('Menarik data')) {
+                let html = '';
+                sorted.forEach(data => {
+                    html += `<tr id="row-${data.symbol}">
+                        <td class="col-pair"></td>
+                        <td class="col-price"></td>
+                        <td class="col-spike"></td>
+                        <td class="col-rsi"></td>
+                        <td class="col-bs"></td>
+                        <td class="col-score"></td>
+                    </tr>`;
+                });
+                tbody.innerHTML = html;
+            }
+
+            sorted.forEach((data, index) => {
+                const tr = document.getElementById(`row-${data.symbol}`);
+                if (!tr) return;
+                
+                // Urutkan ulang node DOM secara real-time jika posisi rankingnya berubah
+                if (tbody.children[index] !== tr) {
+                    tbody.insertBefore(tr, tbody.children[index]);
+                }
+                
                 let rowClass = data.score >= 3 ? 'highlight' : '';
+                tr.className = rowClass;
+                
                 let scoreClass = 's-safe';
                 if (data.score === 2) scoreClass = 's-warn';
                 if (data.score >= 3) scoreClass = 's-danger';
+
+                tr.querySelector('.col-pair').innerHTML = `<strong>${data.symbol.replace('USDT','')}</strong>`;
+                tr.querySelector('.col-price').innerHTML = `${formatPrice(data.price)}`; // TANPA $
                 
-                html += `
-                    <tr class="${rowClass}">
-                        <td><strong>${data.symbol.replace('USDT','')}</strong></td>
-                        <td>$${formatPrice(data.price)}</td>
-                        <td style="color: ${data.volSpike > 100 ? 'var(--danger)' : 'var(--text-main)'}">${data.volSpike > 0 ? '+' : ''}${data.volSpike.toFixed(0)}%</td>
-                        <td style="color: ${data.rsi > 70 ? 'var(--danger)' : 'var(--text-main)'}">${data.rsi.toFixed(1)}</td>
-                        <td>${data.bsRatio.toFixed(2)}</td>
-                        <td><span class="score ${scoreClass}">${data.score}/4</span></td>
-                    </tr>
-                `;
+                const spikeCol = tr.querySelector('.col-spike');
+                spikeCol.style.color = data.volSpike > 100 ? 'var(--danger)' : 'var(--text-main)';
+                spikeCol.innerText = `${data.volSpike > 0 ? '+' : ''}${data.volSpike.toFixed(0)}%`;
+                
+                const rsiCol = tr.querySelector('.col-rsi');
+                rsiCol.style.color = data.rsi > 70 ? 'var(--danger)' : 'var(--text-main)';
+                rsiCol.innerText = data.rsi.toFixed(1);
+                
+                tr.querySelector('.col-bs').innerText = data.bsRatio.toFixed(2);
+                tr.querySelector('.col-score').innerHTML = `<span class="score ${scoreClass}">${data.score}/4</span>`;
             });
-            tbody.innerHTML = html;
+            
             document.getElementById('status-text').innerText = `Radar Aktif: ${sorted.length} Koin`;
         }
 
