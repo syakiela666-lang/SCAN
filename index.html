@@ -78,27 +78,27 @@
             min-width: 260px;
         }
         .lh-col { flex: 1; user-select: none; }
-        .lh-col:first-child { flex: 1.2; text-align: left; }
-        .lh-col.text-right { text-align: right; }
+        .lh-col:first-child { flex: 1; text-align: left; }
+        .lh-col.text-right { text-align: right; flex: 0 0 70px; }
         .sort-arrow { display: inline-block; width: 10px; font-size: 12px; color: var(--accent); }
         
         .coin-list {
             flex: 1;
             overflow-y: auto;
-            padding: 0 5px 5px 5px;
+            padding: 0 5px 5px 10px;
             min-width: 260px;
         }
+        
         .coin-item {
             display: flex;
-            justify-content: space-between;
             align-items: center;
-            padding: 10px 5px;
+            padding: 10px 0;
             border-bottom: 1px solid rgba(255,255,255,0.03);
             cursor: pointer;
+            gap: 15px; /* Mengatur jarak agar lebih dekat */
         }
         .coin-name { font-weight: bold; font-size: 14px; }
         
-        /* Font Harga > Persen */
         .coin-price { font-size: 14px; font-weight: bold; color: var(--text-main); }
         .coin-change { font-size: 11px; font-weight: normal; margin-top: 3px; }
         .coin-change.up { color: var(--success); }
@@ -207,10 +207,9 @@
             <button class="toggle-btn" style="background-color: var(--success); width: 100%;" onclick="startScan()">🚀 Mulai Scan</button>
         </div>
         
-        <!-- Binance Style Headers -->
+        <!-- Teks dibuat super simple: Pair dan 24h% -->
         <div class="list-headers">
-            <div class="lh-col" onclick="handleSort('vol')">Pair / Vol <span class="sort-arrow" id="arrow-vol">▾</span></div>
-            <div class="lh-col text-right" onclick="handleSort('price')">Harga <span class="sort-arrow" id="arrow-price"></span></div>
+            <div class="lh-col" onclick="handleSort('vol')">Pair <span class="sort-arrow" id="arrow-vol">▾</span></div>
             <div class="lh-col text-right" onclick="handleSort('change')">24h% <span class="sort-arrow" id="arrow-change"></span></div>
         </div>
 
@@ -255,7 +254,6 @@
         let selectedCoins = new Set();
         let listWs = null;
 
-        // State untuk sorting Header ala Binance
         let currentSortCol = 'vol';
         let currentSortDir = 'desc'; 
 
@@ -292,11 +290,11 @@
 
         function updateSortUI() {
             document.getElementById('arrow-vol').innerText = '';
-            document.getElementById('arrow-price').innerText = '';
             document.getElementById('arrow-change').innerText = '';
             
             const arrow = currentSortDir === 'desc' ? '▾' : '▴';
-            document.getElementById(`arrow-${currentSortCol}`).innerText = arrow;
+            const arrowEl = document.getElementById(`arrow-${currentSortCol}`);
+            if (arrowEl) arrowEl.innerText = arrow;
         }
 
         function sortCoins() {
@@ -304,10 +302,6 @@
                 allCoins.sort((a, b) => currentSortDir === 'desc' 
                     ? parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume)
                     : parseFloat(a.quoteVolume) - parseFloat(b.quoteVolume));
-            } else if (currentSortCol === 'price') {
-                allCoins.sort((a, b) => currentSortDir === 'desc' 
-                    ? parseFloat(b.lastPrice) - parseFloat(a.lastPrice)
-                    : parseFloat(a.lastPrice) - parseFloat(b.lastPrice));
             } else if (currentSortCol === 'change') {
                 allCoins.sort((a, b) => currentSortDir === 'desc' 
                     ? parseFloat(b.priceChangePercent) - parseFloat(a.priceChangePercent)
@@ -331,12 +325,12 @@
                 const label = document.createElement('label');
                 label.className = 'coin-item';
                 label.innerHTML = `
-                    <span style="display:flex; align-items:center; gap:8px;">
+                    <div style="display:flex; align-items:center; gap:8px; width: 100px;">
                         <input type="checkbox" value="${coin.symbol}" ${isChecked} onchange="toggleCoinSelection(this)"> 
                         <span class="coin-name">${name}</span>
-                    </span>
-                    <div style="text-align: right;">
-                        <div class="coin-price" id="price-${coin.symbol}">${price}</div>
+                    </div>
+                    <div style="text-align: right; flex: 1;">
+                        <div class="coin-price" id="price-${coin.symbol}">$${price}</div>
                         <div class="coin-change ${changeClass}" id="change-${coin.symbol}">${changeSign}${change.toFixed(2)}%</div>
                     </div>
                 `;
@@ -346,11 +340,14 @@
 
         function startListWebsocket() {
             if (listWs) listWs.close();
-            listWs = new WebSocket('wss://fstream.binance.com/ws/!ticker@arr');
+            // Pindah ke combined stream url agar lebih terstruktur event datanya
+            listWs = new WebSocket('wss://fstream.binance.com/stream?streams=!ticker@arr');
             
             listWs.onmessage = (event) => {
-                const data = JSON.parse(event.data);
-                data.forEach(ticker => {
+                const msg = JSON.parse(event.data);
+                if (!msg.data) return;
+                
+                msg.data.forEach(ticker => {
                     const symbol = ticker.s;
                     const changeEl = document.getElementById(`change-${symbol}`);
                     const priceEl = document.getElementById(`price-${symbol}`);
@@ -362,10 +359,12 @@
                         
                         changeEl.className = `coin-change ${changeClass}`;
                         changeEl.innerText = `${changeSign}${change.toFixed(2)}%`;
-                        priceEl.innerText = `${formatPrice(ticker.c)}`;
+                        priceEl.innerText = `$${formatPrice(ticker.c)}`;
                     }
                 });
             };
+            
+            listWs.onerror = (e) => console.log("WS List Error", e);
             listWs.onclose = () => setTimeout(startListWebsocket, 3000);
         }
 
@@ -382,9 +381,6 @@
             document.getElementById('sidebar').classList.toggle('collapsed');
         }
 
-        // ==========================================
-        // FASE 2 & 3: Scan Histori + WebSocket Radar
-        // ==========================================
         let scannedData = {}; 
         let radarWs = null;
         let lastRenderTime = 0;
@@ -438,6 +434,7 @@
         }
 
         function startRadarWebsocket() {
+            if (radarWs) radarWs.close();
             const streams = Array.from(selectedCoins).map(sym => `${sym.toLowerCase()}@kline_1m`);
             if (streams.length === 0) return;
             
@@ -483,6 +480,7 @@
                 renderDashboard();
             };
 
+            radarWs.onerror = (e) => console.log("Radar WS Error", e);
             radarWs.onclose = () => setTimeout(startRadarWebsocket, 3000);
         }
 
