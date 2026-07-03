@@ -65,20 +65,27 @@
             cursor: pointer;
             padding: 0 5px;
         }
-        select.sort-dropdown {
-            background-color: var(--bg-dark);
-            color: var(--text-main);
-            border: 1px solid var(--border);
-            padding: 6px;
-            border-radius: 4px;
-            font-size: 12px;
-            outline: none;
+        
+        /* Headers List ala Binance */
+        .list-headers {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 10px;
+            border-bottom: 1px solid var(--border);
+            font-size: 11px;
+            color: var(--text-muted);
+            cursor: pointer;
+            min-width: 260px;
         }
+        .lh-col { flex: 1; user-select: none; }
+        .lh-col:first-child { flex: 1.2; text-align: left; }
+        .lh-col.text-right { text-align: right; }
+        .sort-arrow { display: inline-block; width: 10px; font-size: 12px; color: var(--accent); }
         
         .coin-list {
             flex: 1;
             overflow-y: auto;
-            padding: 5px;
+            padding: 0 5px 5px 5px;
             min-width: 260px;
         }
         .coin-item {
@@ -86,14 +93,16 @@
             justify-content: space-between;
             align-items: center;
             padding: 10px 5px;
-            border-bottom: 1px solid rgba(255,255,255,0.05);
+            border-bottom: 1px solid rgba(255,255,255,0.03);
             cursor: pointer;
         }
-        .coin-name { font-weight: bold; }
-        .coin-change { font-weight: bold; }
+        .coin-name { font-weight: bold; font-size: 14px; }
+        
+        /* Font Harga > Persen */
+        .coin-price { font-size: 14px; font-weight: bold; color: var(--text-main); }
+        .coin-change { font-size: 11px; font-weight: normal; margin-top: 3px; }
         .coin-change.up { color: var(--success); }
         .coin-change.down { color: var(--danger); }
-        .coin-price { font-size: 12px; color: var(--text-muted); font-family: monospace; }
         
         .main-content {
             flex: 1;
@@ -195,13 +204,16 @@
                 <strong>Pilih Koin</strong>
                 <button class="close-btn" onclick="toggleSidebar()">✕</button>
             </div>
-            <select class="sort-dropdown" id="sort-select" onchange="sortCoins()">
-                <option value="vol">🔥 Volume Tertinggi</option>
-                <option value="high">🚀 % Kenaikan (Top Gainers)</option>
-                <option value="low">🩸 % Penurunan (Top Losers)</option>
-            </select>
-            <button class="toggle-btn" style="background-color: var(--success); width: 100%; margin-top: 5px;" onclick="startScan()">🚀 Mulai Scan</button>
+            <button class="toggle-btn" style="background-color: var(--success); width: 100%;" onclick="startScan()">🚀 Mulai Scan</button>
         </div>
+        
+        <!-- Binance Style Headers -->
+        <div class="list-headers">
+            <div class="lh-col" onclick="handleSort('vol')">Pair / Vol <span class="sort-arrow" id="arrow-vol">▾</span></div>
+            <div class="lh-col text-right" onclick="handleSort('price')">Harga <span class="sort-arrow" id="arrow-price"></span></div>
+            <div class="lh-col text-right" onclick="handleSort('change')">24h% <span class="sort-arrow" id="arrow-change"></span></div>
+        </div>
+
         <div class="coin-list" id="coin-list-container">
             <div style="padding: 10px; color: var(--text-muted); text-align: center;">Memuat koin...</div>
         </div>
@@ -243,6 +255,10 @@
         let selectedCoins = new Set();
         let listWs = null;
 
+        // State untuk sorting Header ala Binance
+        let currentSortCol = 'vol';
+        let currentSortDir = 'desc'; 
+
         function formatPrice(p) {
             const num = parseFloat(p);
             if (num < 0.1) return num.toFixed(5);
@@ -255,6 +271,7 @@
                 const response = await fetch(REST_URL);
                 const data = await response.json();
                 allCoins = data.filter(c => c.symbol.endsWith('USDT') && !c.symbol.includes('_'));
+                updateSortUI();
                 sortCoins();
                 startListWebsocket();
             } catch (error) {
@@ -262,14 +279,39 @@
             }
         }
 
+        function handleSort(col) {
+            if (currentSortCol === col) {
+                currentSortDir = currentSortDir === 'desc' ? 'asc' : 'desc';
+            } else {
+                currentSortCol = col;
+                currentSortDir = 'desc'; 
+            }
+            updateSortUI();
+            sortCoins();
+        }
+
+        function updateSortUI() {
+            document.getElementById('arrow-vol').innerText = '';
+            document.getElementById('arrow-price').innerText = '';
+            document.getElementById('arrow-change').innerText = '';
+            
+            const arrow = currentSortDir === 'desc' ? '▾' : '▴';
+            document.getElementById(`arrow-${currentSortCol}`).innerText = arrow;
+        }
+
         function sortCoins() {
-            const sortBy = document.getElementById('sort-select').value;
-            if (sortBy === 'vol') {
-                allCoins.sort((a, b) => parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume));
-            } else if (sortBy === 'high') {
-                allCoins.sort((a, b) => parseFloat(b.priceChangePercent) - parseFloat(a.priceChangePercent));
-            } else if (sortBy === 'low') {
-                allCoins.sort((a, b) => parseFloat(a.priceChangePercent) - parseFloat(b.priceChangePercent));
+            if (currentSortCol === 'vol') {
+                allCoins.sort((a, b) => currentSortDir === 'desc' 
+                    ? parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume)
+                    : parseFloat(a.quoteVolume) - parseFloat(b.quoteVolume));
+            } else if (currentSortCol === 'price') {
+                allCoins.sort((a, b) => currentSortDir === 'desc' 
+                    ? parseFloat(b.lastPrice) - parseFloat(a.lastPrice)
+                    : parseFloat(a.lastPrice) - parseFloat(b.lastPrice));
+            } else if (currentSortCol === 'change') {
+                allCoins.sort((a, b) => currentSortDir === 'desc' 
+                    ? parseFloat(b.priceChangePercent) - parseFloat(a.priceChangePercent)
+                    : parseFloat(a.priceChangePercent) - parseFloat(b.priceChangePercent));
             }
             renderCoinList();
         }
@@ -294,7 +336,7 @@
                         <span class="coin-name">${name}</span>
                     </span>
                     <div style="text-align: right;">
-                        <div class="coin-price" id="price-${coin.symbol}">$${price}</div>
+                        <div class="coin-price" id="price-${coin.symbol}">${price}</div>
                         <div class="coin-change ${changeClass}" id="change-${coin.symbol}">${changeSign}${change.toFixed(2)}%</div>
                     </div>
                 `;
@@ -320,7 +362,7 @@
                         
                         changeEl.className = `coin-change ${changeClass}`;
                         changeEl.innerText = `${changeSign}${change.toFixed(2)}%`;
-                        priceEl.innerText = `$${formatPrice(ticker.c)}`;
+                        priceEl.innerText = `${formatPrice(ticker.c)}`;
                     }
                 });
             };
@@ -341,9 +383,11 @@
         }
 
         // ==========================================
-        // FASE 2: Hitung Indikator Histori (TF 1m)
+        // FASE 2 & 3: Scan Histori + WebSocket Radar
         // ==========================================
         let scannedData = {}; 
+        let radarWs = null;
+        let lastRenderTime = 0;
 
         async function startScan() {
             if (selectedCoins.size === 0) {
@@ -352,18 +396,17 @@
             }
             
             const tbody = document.getElementById('dashboard-body');
-            tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: var(--text-muted); padding: 20px;">Menarik data histori untuk ${selectedCoins.size} koin...<br><small>(Diberi jeda agar aman dari limit)</small></td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: var(--text-muted); padding: 20px;">Menarik data histori untuk ${selectedCoins.size} koin...</td></tr>`;
             
             if (window.innerWidth <= 768) {
                 document.getElementById('sidebar').classList.add('collapsed');
             }
 
             scannedData = {}; 
+            if (radarWs) radarWs.close();
             
-            // Batch request perlahan
             for (let symbol of selectedCoins) {
                 try {
-                    // Ambil 50 candle (cukup utk RSI 14 & SMA 20)
                     const res = await fetch(`https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=1m&limit=50`);
                     const klines = await res.json();
                     
@@ -378,16 +421,69 @@
                     const lastPrice = closes[closes.length-1];
                     const score = calculateScore(rsi, volSpike, bsRatio);
                     
-                    scannedData[symbol] = { symbol, price: lastPrice, rsi, volSpike, bsRatio, score };
+                    scannedData[symbol] = { 
+                        symbol, price: lastPrice, rsi, volSpike, bsRatio, score,
+                        closes, volumes, takerBuys, lastKlineTime: klines[klines.length-1][0]
+                    };
                     
-                    // Jeda aman 100ms
-                    await new Promise(r => setTimeout(r, 100));
+                    await new Promise(r => setTimeout(r, 100)); 
                 } catch(e) {
                     console.error("Gagal tarik kline", symbol, e);
                 }
             }
             
+            lastRenderTime = 0;
             renderDashboard();
+            startRadarWebsocket();
+        }
+
+        function startRadarWebsocket() {
+            const streams = Array.from(selectedCoins).map(sym => `${sym.toLowerCase()}@kline_1m`);
+            if (streams.length === 0) return;
+            
+            const wsUrl = `wss://fstream.binance.com/stream?streams=${streams.join('/')}`;
+            radarWs = new WebSocket(wsUrl);
+            
+            radarWs.onmessage = (event) => {
+                const msg = JSON.parse(event.data);
+                if (!msg.data || !msg.data.k) return;
+                
+                const kline = msg.data.k;
+                const symbol = kline.s;
+                const data = scannedData[symbol];
+                if (!data) return;
+                
+                const closePrice = parseFloat(kline.c);
+                const volume = parseFloat(kline.v);
+                const tbVol = parseFloat(kline.V); 
+                
+                if (kline.t === data.lastKlineTime) {
+                    data.closes[data.closes.length - 1] = closePrice;
+                    data.volumes[data.volumes.length - 1] = volume;
+                    data.takerBuys[data.takerBuys.length - 1] = tbVol;
+                } else if (kline.t > data.lastKlineTime) {
+                    data.closes.push(closePrice);
+                    data.volumes.push(volume);
+                    data.takerBuys.push(tbVol);
+                    
+                    if (data.closes.length > 50) {
+                        data.closes.shift();
+                        data.volumes.shift();
+                        data.takerBuys.shift();
+                    }
+                    data.lastKlineTime = kline.t;
+                }
+                
+                data.price = closePrice;
+                data.rsi = calculateRSI(data.closes);
+                data.volSpike = calculateVolSpike(data.volumes);
+                data.bsRatio = calculateBSRatio(data.volumes[data.volumes.length - 1], data.takerBuys[data.takerBuys.length - 1]);
+                data.score = calculateScore(data.rsi, data.volSpike, data.bsRatio);
+                
+                renderDashboard();
+            };
+
+            radarWs.onclose = () => setTimeout(startRadarWebsocket, 3000);
         }
 
         function calculateRSI(closes, period = 14) {
@@ -433,41 +529,40 @@
             let score = 0;
             if (rsi > 70) score += 1;
             if (rsi > 85) score += 1;
-            if (spike > 200) score += 1; // vol naik tajam
-            if (bs < 0.8) score += 1; // pembeli agresif drop
-            return score; // Max 4
+            if (spike > 200) score += 1; 
+            if (bs < 0.8) score += 1; 
+            return score; 
         }
 
         function renderDashboard() {
+            const now = Date.now();
+            if (now - lastRenderTime < 500 && Object.keys(scannedData).length > 0) return;
+            lastRenderTime = now;
+
             const tbody = document.getElementById('dashboard-body');
-            tbody.innerHTML = '';
-            
-            // Sort by score besar di atas, lalu urutkan vol spike
             const sorted = Object.values(scannedData).sort((a,b) => b.score - a.score || b.volSpike - a.volSpike);
             
-            if (sorted.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="6" style="text-align: center;">Gagal memuat.</td></tr>';
-                return;
-            }
+            if (sorted.length === 0) return;
 
+            let html = '';
             sorted.forEach(data => {
-                const tr = document.createElement('tr');
-                if (data.score >= 3) tr.className = 'highlight';
-                
+                let rowClass = data.score >= 3 ? 'highlight' : '';
                 let scoreClass = 's-safe';
                 if (data.score === 2) scoreClass = 's-warn';
                 if (data.score >= 3) scoreClass = 's-danger';
                 
-                tr.innerHTML = `
-                    <td><strong>${data.symbol.replace('USDT','')}</strong></td>
-                    <td>$${formatPrice(data.price)}</td>
-                    <td style="color: ${data.volSpike > 100 ? 'var(--danger)' : 'var(--text-main)'}">${data.volSpike > 0 ? '+' : ''}${data.volSpike.toFixed(0)}%</td>
-                    <td style="color: ${data.rsi > 70 ? 'var(--danger)' : 'var(--text-main)'}">${data.rsi.toFixed(1)}</td>
-                    <td>${data.bsRatio.toFixed(2)}</td>
-                    <td><span class="score ${scoreClass}">${data.score}/4</span></td>
+                html += `
+                    <tr class="${rowClass}">
+                        <td><strong>${data.symbol.replace('USDT','')}</strong></td>
+                        <td>$${formatPrice(data.price)}</td>
+                        <td style="color: ${data.volSpike > 100 ? 'var(--danger)' : 'var(--text-main)'}">${data.volSpike > 0 ? '+' : ''}${data.volSpike.toFixed(0)}%</td>
+                        <td style="color: ${data.rsi > 70 ? 'var(--danger)' : 'var(--text-main)'}">${data.rsi.toFixed(1)}</td>
+                        <td>${data.bsRatio.toFixed(2)}</td>
+                        <td><span class="score ${scoreClass}">${data.score}/4</span></td>
+                    </tr>
                 `;
-                tbody.appendChild(tr);
             });
+            tbody.innerHTML = html;
             document.getElementById('status-text').innerText = `Radar Aktif: ${sorted.length} Koin`;
         }
 
